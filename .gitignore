@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Project data (images, thumbnails, vector db, trained adapters, feedback)
+data/
+
+# Env / secrets
+.env

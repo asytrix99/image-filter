@@ -1,0 +1,22 @@
+# --- Core CV pipeline (Phase 1) ---
+torch                 # PyTorch: runs the CLIP model (CPU wheels by default)
+open_clip_torch       # pretrained CLIP models (ViT-B/32) + tokenizer
+pillow                # image decode / validation / thumbnails
+numpy                 # vector math
+
+# --- Vector store (Phase 1) ---
+qdrant-client         # embedded (local, on-disk) now; same client points at Qdrant Cloud later
+
+# --- Web API (Phase 2) ---
+fastapi               # REST API
+uvicorn[standard]     # ASGI server
+python-multipart      # file uploads (zip / query image)
+
+# --- Multi-agent layer (Phase 3) ---
+strands-agents        # Strands SDK (Agent, tools, multiagent, Bedrock model)
+strands-agents-tools  # community tools
+boto3                 # AWS Bedrock access
+
+# --- Adaptive retraining (Phase 4, optional Tier-3 LoRA) ---
+# peft
+# accelerate
