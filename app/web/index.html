@@ -64,6 +64,12 @@
   </div>
   <p class="hint">Tip: drag an image file onto the search box for “find more like this”.</p>
 
+  <div class="searchbar">
+    <input id="ask" placeholder="Ask the assistant: 'how many dogs do I have?', 'show me photos from the beach'…">
+    <button id="askGo" style="background:#2b3346;">Ask 🤖</button>
+  </div>
+  <div id="answer" style="color:var(--muted);font-size:14px;margin:0 0 16px;white-space:pre-wrap;"></div>
+
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty">No results yet — index a zip, then search.</div>
 </main>
@@ -178,6 +184,26 @@ $('#lb').onclick = () => $('#lb').style.display = 'none';
 // --- wiring ---
 $('#go').onclick = doTextSearch;
 $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') doTextSearch(); });
+
+// --- ask the multi-agent assistant ---
+async function doAsk() {
+  const q = $('#ask').value.trim();
+  if (!q) return;
+  const ans = $('#answer');
+  ans.textContent = '🤖 thinking…';
+  try {
+    const resp = await fetch('/ask', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ q })
+    });
+    const data = await resp.json();
+    if (!resp.ok) { ans.textContent = '❌ ' + (data.detail || 'agent error'); return; }
+    ans.textContent = data.answer || '';
+    render(data.results || []);
+  } catch (e) { ans.textContent = '❌ ' + e; }
+}
+$('#askGo').onclick = doAsk;
+$('#ask').addEventListener('keydown', e => { if (e.key === 'Enter') doAsk(); });
 
 const drop = $('#drop'), zipInput = $('#zipInput');
 drop.onclick = () => zipInput.click();

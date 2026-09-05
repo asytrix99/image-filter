@@ -16,6 +16,8 @@ python-multipart      # file uploads (zip / query image)
 strands-agents        # Strands SDK (Agent, tools, multiagent, Bedrock model)
 strands-agents-tools  # community tools
 boto3                 # AWS Bedrock access
+botocore[crt]         # required for the AWS `login_session` credential provider
+awscrt                # native CRT dependency for the login credential provider
 
 # --- Adaptive retraining (Phase 4, optional Tier-3 LoRA) ---
 # peft

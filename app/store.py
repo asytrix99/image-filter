@@ -14,6 +14,7 @@ IMGF_QDRANT_URL switches to a Qdrant server / Qdrant Cloud with identical code.
 from __future__ import annotations
 
 import uuid
+from functools import lru_cache
 from typing import Protocol
 
 import numpy as np
@@ -102,3 +103,14 @@ class QdrantStore:
 
     def count(self) -> int:
         return self.client.count(collection_name=self.collection).count
+
+
+@lru_cache(maxsize=1)
+def get_store() -> QdrantStore:
+    """Process-wide singleton QdrantStore.
+
+    Embedded Qdrant locks its storage directory, so only ONE client may open it
+    per process. The API and the agent tools must both go through this so they
+    share a single client instead of constructing competing ones.
+    """
+    return QdrantStore()

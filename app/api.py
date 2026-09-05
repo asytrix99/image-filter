@@ -25,17 +25,17 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from . import config, indexer, search
 from .sources import ZipSource
-from .store import QdrantStore
+from .store import get_store
 
 app = FastAPI(title="image-filter")
 
 config.ensure_dirs()
-STORE = QdrantStore()                 # single shared client (see module docstring)
+STORE = get_store()                   # single shared client (see module docstring)
 JOBS: dict[str, dict] = {}            # in-memory job status: job_id -> {...}
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -138,3 +138,36 @@ def image(image_id: str):
 @app.get("/stats")
 def stats():
     return {"count": STORE.count()}
+
+
+# --- Natural-language assistant (Module 6, needs AWS Bedrock creds) ----------
+_ORCHESTRATOR = None
+
+
+def _get_orchestrator():
+    """Build the orchestrator on first use (so the server starts without AWS)."""
+    global _ORCHESTRATOR
+    if _ORCHESTRATOR is None:
+        from .agents.orchestrator import build_orchestrator
+        _ORCHESTRATOR = build_orchestrator()
+    return _ORCHESTRATOR
+
+
+@app.post("/ask")
+def ask(q: str = Body(..., embed=True)):
+    """Route a natural-language request through the Strands multi-agent system.
+
+    Returns the assistant's text answer plus any images its tools surfaced.
+    """
+    q = (q or "").strip()
+    if not q:
+        raise HTTPException(400, "empty question")
+
+    from .agents import shared
+    shared.reset_results()
+    try:
+        result = _get_orchestrator()(q)
+    except Exception as exc:  # noqa: BLE001 - surface agent/Bedrock errors to the UI
+        raise HTTPException(502, f"agent error (is AWS Bedrock configured?): {exc}")
+
+    return {"answer": str(result), "results": shared.take_results()}
