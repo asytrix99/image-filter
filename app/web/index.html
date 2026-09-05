@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Filter — semantic image search</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#282d38; --fg:#e7e9ee; --muted:#98a0b0; --accent:#5b8cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  header .count { color:var(--muted); font-size:13px; margin-left:auto; }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+
+  .drop { border:2px dashed var(--line); border-radius:12px; padding:22px; text-align:center; color:var(--muted);
+          cursor:pointer; transition:.15s; margin-bottom:20px; }
+  .drop.hot { border-color:var(--accent); color:var(--fg); background:#1b2130; }
+  .progress { height:6px; background:var(--line); border-radius:4px; margin-top:12px; overflow:hidden; display:none; }
+  .progress > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+
+  .searchbar { display:flex; gap:10px; margin-bottom:8px; }
+  .searchbar input { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--fg);
+                     border-radius:10px; padding:12px 14px; font-size:15px; }
+  .searchbar input:focus { outline:none; border-color:var(--accent); }
+  .searchbar button { background:var(--accent); color:#fff; border:0; border-radius:10px; padding:0 18px;
+                      font-weight:600; cursor:pointer; }
+  .hint { color:var(--muted); font-size:12px; margin:0 0 20px; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; }
+  .card img { width:100%; height:150px; object-fit:cover; display:block; }
+  .card .meta { padding:6px 8px; font-size:12px; color:var(--muted); display:flex; justify-content:space-between; gap:6px; }
+  .card .meta .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .meta .score { color:var(--accent); }
+  .card .like { display:block; width:100%; border:0; border-top:1px solid var(--line); background:transparent;
+                color:var(--muted); padding:6px; font-size:12px; cursor:pointer; }
+  .card .like:hover { color:var(--fg); background:#1b2130; }
+
+  .empty { color:var(--muted); text-align:center; padding:40px; }
+
+  /* lightbox */
+  #lb { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; padding:30px; }
+  #lb img { max-width:100%; max-height:100%; border-radius:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔎 Image Filter</h1>
+  <span class="count" id="count">…</span>
+</header>
+
+<main>
+  <div class="drop" id="drop">
+    <strong>Drop a .zip of images here</strong> or click to choose — it'll be indexed with CLIP.
+    <input type="file" id="zipInput" accept=".zip" hidden>
+    <div class="progress" id="prog"><div></div></div>
+    <div id="dropMsg"></div>
+  </div>
+
+  <div class="searchbar">
+    <input id="q" placeholder="Search: try 'baby', 'dog on a beach', 'italian food'… or drop an image to find similar">
+    <button id="go">Search</button>
+  </div>
+  <p class="hint">Tip: drag an image file onto the search box for “find more like this”.</p>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty">No results yet — index a zip, then search.</div>
+</main>
+
+<div id="lb"><img id="lbImg" alt=""></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const grid = $('#grid'), empty = $('#empty');
+
+async function refreshCount() {
+  try { const r = await (await fetch('/stats')).json(); $('#count').textContent = r.count + ' images indexed'; }
+  catch { $('#count').textContent = ''; }
+}
+
+function render(results) {
+  grid.innerHTML = '';
+  empty.style.display = results.length ? 'none' : 'block';
+  if (!results.length) { empty.textContent = 'No matches.'; return; }
+  for (const r of results) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <img src="${r.thumb_url}" loading="lazy" alt="">
+      <div class="meta"><span class="name" title="${r.filename||''}">${r.filename||r.image_id}</span>
+        <span class="score">${r.score.toFixed(3)}</span></div>
+      <button class="like">✨ more like this</button>`;
+    card.querySelector('img').onclick = () => openLightbox(r.image_url);
+    card.querySelector('.like').onclick = e => { e.stopPropagation(); moreLikeThisById(r.image_url); };
+    grid.appendChild(card);
+  }
+}
+
+async function doTextSearch() {
+  const q = $('#q').value.trim();
+  if (!q) return;
+  const r = await (await fetch('/search?k=50&q=' + encodeURIComponent(q))).json();
+  render(r.results);
+}
+
+async function searchByImageBlob(blob, q) {
+  const fd = new FormData();
+  fd.append('file', blob, 'query.jpg');
+  if (q) fd.append('q', q);
+  const r = await (await fetch('/search_by_image', { method:'POST', body: fd })).json();
+  render(r.results);
+}
+
+async function moreLikeThisById(imageUrl) {
+  const blob = await (await fetch(imageUrl)).blob();
+  await searchByImageBlob(blob, null);
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+// Route a dropped/chosen file: .zip -> index it, image -> find similar.
+function routeFile(file) {
+  if (!file) return;
+  if (file.name.toLowerCase().endsWith('.zip')) {
+    uploadZip(file);
+  } else if (file.type.startsWith('image/')) {
+    $('#dropMsg').textContent = '🔎 Finding images similar to ' + file.name + '…';
+    searchByImageBlob(file, $('#q').value.trim() || null);
+  } else {
+    $('#dropMsg').textContent = '❌ Unsupported file. Drop a .zip to index, or an image to find similar.';
+  }
+}
+
+// --- zip upload + progress polling ---
+async function uploadZip(file) {
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    $('#dropMsg').textContent = '❌ Not a .zip. Drop a zip to index, or an image to find similar.';
+    return;
+  }
+  const prog = $('#prog'); prog.style.display = 'block';
+  const bar = prog.firstElementChild; bar.style.width = '5%';
+  $('#dropMsg').textContent = 'Uploading ' + file.name + '…';
+  const fd = new FormData(); fd.append('file', file);
+
+  const resp = await fetch('/upload', { method:'POST', body: fd });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    $('#dropMsg').textContent = '❌ ' + (err.detail || 'upload failed');
+    prog.style.display = 'none';
+    return;
+  }
+  const { job_id } = await resp.json();
+  if (!job_id) { $('#dropMsg').textContent = '❌ server did not return a job id'; prog.style.display = 'none'; return; }
+
+  const poll = setInterval(async () => {
+    const s = await (await fetch('/status/' + job_id)).json();
+    if (s.status === 'indexing' || s.status === 'done') {
+      const pct = s.total ? Math.round(100 * s.indexed / s.total) : 10;
+      bar.style.width = Math.max(pct, 8) + '%';
+      $('#dropMsg').textContent = `Indexing ${s.indexed}/${s.total} (skipped ${s.skipped})`;
+    }
+    if (s.status === 'done') {
+      clearInterval(poll);
+      $('#dropMsg').textContent = `✅ Indexed ${s.indexed}, skipped ${s.skipped}.`;
+      setTimeout(() => prog.style.display = 'none', 1500);
+      refreshCount();
+    } else if (s.status === 'error') {
+      clearInterval(poll);
+      $('#dropMsg').textContent = '❌ ' + s.error;
+    }
+  }, 700);
+}
+
+// --- lightbox ---
+function openLightbox(url) { $('#lbImg').src = url; $('#lb').style.display = 'flex'; }
+$('#lb').onclick = () => $('#lb').style.display = 'none';
+
+// --- wiring ---
+$('#go').onclick = doTextSearch;
+$('#q').addEventListener('keydown', e => { if (e.key === 'Enter') doTextSearch(); });
+
+const drop = $('#drop'), zipInput = $('#zipInput');
+drop.onclick = () => zipInput.click();
+zipInput.onchange = () => routeFile(zipInput.files[0]);
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => routeFile(e.dataTransfer.files[0]));
+
+// drop an image onto the search box -> find more like this
+const q = $('#q');
+['dragover','dragenter'].forEach(ev => q.addEventListener(ev, e => { e.preventDefault(); q.style.borderColor = 'var(--accent)'; }));
+['dragleave','drop'].forEach(ev => q.addEventListener(ev, e => { e.preventDefault(); q.style.borderColor = ''; }));
+q.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) searchByImageBlob(f, q.value.trim() || null);
+});
+
+refreshCount();
+</script>
+</body>
+</html>
